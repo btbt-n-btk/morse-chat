@@ -6,6 +6,7 @@ import unicodedata
 import os # OSの環境変数を読むため
 from dotenv import load_dotenv # .envファイルを読み込むため
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from flask import Flask, render_template, request, redirect, session, make_response, jsonify
 from markupsafe import Markup
 
@@ -101,7 +102,7 @@ def index():
     if request.method == 'POST':
         name = request.form['name'] 
         content = request.form['content']
-        created_at = datetime.now().strftime('%Y-%m-%d %H:%M')
+        created_at = datetime.now(ZoneInfo("Asia/Tokyo")).strftime('%Y-%m-%d %H:%M')
         converted = WabunMorseConverter().convert(content)
 
         
@@ -175,7 +176,7 @@ def edit_fixed():
         content = request.form['content']
         # 名前は「管理者」などで固定、あるいはフォームで変更可能にしてもOK
         name = "管理者"
-        created_at = datetime.now().strftime('%Y-%m-%d %H:%M')
+        created_at = datetime.now(ZoneInfo("Asia/Tokyo")).strftime('%Y-%m-%d %H:%M')
         
         # ID:1 があるか確認
         c.execute("SELECT id FROM posts WHERE id = 1")
