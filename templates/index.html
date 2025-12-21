@@ -93,6 +93,29 @@
             window.isLiking = false; // エラー時も解除
         });
     }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const textArea = document.getElementById('messageInput');
+        
+        if (textArea) {
+            textArea.addEventListener('keydown', function(e) {
+                // Ctrlキー (MacはCommandキー) + Enterキー が押されたら
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    // 1. 改行が入るのを防ぐ
+                    e.preventDefault();
+                    
+                    // 2. 送信ボタンを「カチッ」と押したことにする
+                    // (こうすることで form の onsubmit や required 属性のチェックも正常に動きます)
+                    const form = textArea.closest('form');
+                    const submitBtn = form.querySelector('button[type="submit"]');
+                    if (submitBtn) {
+                        submitBtn.click();
+                    }
+                }
+            });
+        }
+    });
+
     </script>
 </head>
 <body class="bg-light">
