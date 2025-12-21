@@ -97,6 +97,13 @@
 </head>
 <body class="bg-light">
 
+<noscript>
+    <div class="alert alert-danger text-center" role="alert">
+        <strong>⚠️ 注意：</strong> このサイトの機能を利用するには、ブラウザのJavaScriptを有効にしてください。<br>
+        無効の状態では「いいね」や「解読機能」が動きません。
+    </div>
+</noscript>
+
 {% if is_admin %}
 <div class="alert alert-danger text-center m-0 p-1 rounded-0">
     管理者モードでログイン中 
@@ -110,9 +117,16 @@
             ? 使い方
         </a>
 
-    <div class="card mb-4 shadow-sm">
+
+<div class="card mb-4 shadow-sm">
         <div class="card-body">
             <form action="/" method="POST">
+                
+                {% if error_message %}
+                <div class="alert alert-danger" role="alert">
+                    <strong>⚠️ エラー：</strong> {{ error_message }}
+                </div>
+                {% endif %}
                 <div class="mb-3">
                     <label class="form-label">お名前</label>
                     <input type="text" name="name" class="form-control" placeholder="名無しさん" value="{{ saved_name }}">
@@ -120,8 +134,9 @@
                 
                 <div class="mb-3">
                     <label class="form-label">メッセージ <small class="text-muted">（かな・数字・記号のみ）</small></label>
+                    
                     <textarea name="content" id="messageInput" class="form-control" rows="3" 
-                              placeholder="いまナニしてる？" required></textarea>
+                              placeholder="いまナニしてる？" required>{{ input_content }}</textarea>
                     <div id="inputHelp" class="form-text text-danger fw-bold" style="height: 1.5em;"></div>
                 </div>
                 

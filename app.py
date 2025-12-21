@@ -17,6 +17,7 @@ import time
 load_dotenv()
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
 
 # ★重要：セッションを暗号化するための鍵をセット
 # .envから読み込む（なければデフォルト値を使う）
@@ -87,81 +88,106 @@ def jump(post_id):
 # --- メイン機能 ---
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    # 1. Cookie情報の取得
+    # 共通で使う変数の初期化
     user_id = request.cookies.get('user_id')
-    if not user_id:
-        user_id = str(uuid.uuid4()) # IDがなければ発行
-    
+    if not user_id: user_id = str(uuid.uuid4())
     saved_name = request.cookies.get('saved_name', "")
-
     is_admin = session.get('is_admin', False)
+    
+    # テンプレートに渡す変数（エラー用）
+    error_message = None
+    input_content = ""
 
+    # --- POST（投稿）の処理 ---
+    if request.method == 'POST':
+        last_post_time = session.get('last_post_time', 0)
+        current_time = time.time()
+        POST_INTERVAL = 5
+        
+        input_content = request.form['content'] # 入力内容を確保しておく
+        name = request.form['name']
+
+        # 【チェック1】連投制限
+        if current_time - last_post_time < POST_INTERVAL:
+            remaining = int(POST_INTERVAL - (current_time - last_post_time))
+            error_message = f"投稿が早すぎます。あと {remaining} 秒待ってください。"
+        
+        # 【チェック2】文字種制限
+        elif re.search(r'[^ぁ-んァ-ヶー0-9\s>、。！？]', input_content):
+            error_message = "許可されていない文字が含まれています。"
+
+        # エラーがなければ保存してリダイレクト
+        else:
+            conn = sqlite3.connect('sns.db')
+            c = conn.cursor()
+            
+            if not name: name = "名無しさん"
+            created_at = datetime.now(ZoneInfo("Asia/Tokyo")).strftime('%Y-%m-%d %H:%M')
+            
+            # モールス変換
+            try:
+                morse_text = WabunMorseConverter().convert(input_content)
+            except:
+                morse_text = "変換エラー"
+
+            c.execute("INSERT INTO posts (name, content, user_id, created_at, likes, converted_content) VALUES (?, ?, ?, ?, 0, ?)",
+                      (name, input_content, user_id, created_at, morse_text))
+            
+            conn.commit()
+            conn.close()
+            
+            # 成功時：時間を記録してリダイレクト（＝入力内容はクリアされる）
+            session['last_post_time'] = current_time
+            
+            resp = make_response(redirect('/'))
+            resp.set_cookie('user_id', user_id, max_age=60*60*24*30)
+            resp.set_cookie('saved_name', name, max_age=60*60*24*30)
+            return resp
+
+    # --- GET（表示）の処理 ---
+    # ※POSTでエラーがあった場合も、returnせずにここまで下りてきます
+    
     conn = sqlite3.connect('sns.db')
     c = conn.cursor()
 
-    # --- POST（投稿時）の処理 ---
-    if request.method == 'POST':
-        name = request.form['name'] 
-        content = request.form['content']
-        created_at = datetime.now(ZoneInfo("Asia/Tokyo")).strftime('%Y-%m-%d %H:%M')
-        converted = WabunMorseConverter().convert(content)
+    # 固定投稿
+    c.execute("SELECT * FROM posts WHERE id = 1")
+    fixed_post = c.fetchone()
 
-        
-        if not name: name = "名無しさん"
-
-        c.execute("INSERT INTO posts (name, content, user_id, created_at, converted_content) VALUES (?, ?, ?, ?, ?)", 
-                  (name, content, user_id, created_at, converted))
-        conn.commit()
-        conn.close()
-        
-        # Cookie保存（IDと名前を30日間記憶）
-        resp = make_response(redirect('/'))
-        resp.set_cookie('user_id', user_id, max_age=60*60*24*30)
-        resp.set_cookie('saved_name', name, max_age=60*60*24*30)
-        return resp
-
-    # --- GET（表示時）の処理 ---
+    # ページネーションと一覧取得
+    page = request.args.get('page', 1, type=int)
+    per_page = 10
+    offset = (page - 1) * per_page
+    
+    sort_by = request.args.get('sort')
+    if sort_by == 'likes':
+        order_sql = "ORDER BY likes DESC"
     else:
-        conn = sqlite3.connect('sns.db')
-        c = conn.cursor()
+        order_sql = "ORDER BY id DESC"
 
-        # ★追加1：固定投稿 (ID:1) を個別に取得
-        c.execute("SELECT * FROM posts WHERE id = 1")
-        fixed_post = c.fetchone()
+    c.execute(f"SELECT * FROM posts WHERE id != 1 {order_sql} LIMIT ? OFFSET ?", (per_page, offset))
+    posts = c.fetchall()
 
-        # A. ページネーション計算
-        page = request.args.get('page', 1, type=int)
-        per_page = 10
-        offset = (page - 1) * per_page
-        
-        # B. 並び替え
-        sort_by = request.args.get('sort')
-        if sort_by == 'likes':
-            order_sql = "ORDER BY likes DESC"
-        else:
-            order_sql = "ORDER BY id DESC"
-
-        # ★変更2：通常のリストからは ID:1 を除外 (WHERE id != 1)
-        # これにより、リストの中にID:1が重複して出るのを防ぎます
-        c.execute(f"SELECT * FROM posts WHERE id != 1 {order_sql} LIMIT ? OFFSET ?", (per_page, offset))
-        posts = c.fetchall()
-
-        # 全件数カウント（ページネーション用）も ID:1 以外で数える
-        c.execute("SELECT COUNT(*) FROM posts WHERE id != 1")
-        total_posts = c.fetchone()[0]
-        total_pages = math.ceil(total_posts / per_page)
-        
-        conn.close()
-        
-        return render_template('index.html', 
-                               posts=posts, 
-                               fixed_post=fixed_post, # ★固定投稿を渡す
-                               current_user_id=user_id, 
-                               saved_name=saved_name,
-                               is_admin=is_admin,
-                               page=page,
-                               total_pages=total_pages,
-                               sort_by=sort_by)
+    c.execute("SELECT COUNT(*) FROM posts WHERE id != 1")
+    total_posts = c.fetchone()[0]
+    total_pages = math.ceil(total_posts / per_page)
+    
+    conn.close()
+    
+    # 画面を表示する
+    # エラー時は error_message と input_content に値が入った状態で表示される
+    return render_template('index.html', 
+                           posts=posts, 
+                           fixed_post=fixed_post,
+                           current_user_id=user_id, 
+                           saved_name=saved_name,
+                           is_admin=is_admin,
+                           page=page,
+                           total_pages=total_pages,
+                           sort_by=sort_by,
+                           error_message=error_message, # ★追加：エラー文
+                           input_content=input_content) # ★追加：入力中の文章
+                           
 
 # ★追加3：固定投稿（ID:1）の編集・作成ルート
 @app.route('/admin/edit_fixed', methods=['GET', 'POST'])
@@ -287,7 +313,8 @@ def admin_login():
             session['is_admin'] = True
             return redirect('/')
         else:
-            msg = "パスワードが違います"
+            time.sleep(2) 
+            return "パスワードが違います", 403
     
     return f'''
     <div style="text-align:center; margin-top:50px;">
@@ -402,6 +429,16 @@ class WabunMorseConverter:
 
     # 全体をスペースでつないで返す
         return ''.join(final_result)
+
+@app.after_request
+def add_security_headers(response):
+    # 「他のサイトがこのページを iframe で埋め込むのを禁止」
+    response.headers['X-Frame-Options'] = 'DENY'
+    
+    # 「ブラウザが勝手にファイルの種類を決めつけるのを禁止」（おまじない）
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    
+    return response
 
 if __name__ == '__main__':
     app.run(debug=True)
