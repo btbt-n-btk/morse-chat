@@ -9,6 +9,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import Flask, render_template, request, redirect, session, make_response, jsonify
 from markupsafe import Markup
+import time
 
 
 # ★管理者用の合言葉（好きな文字に変更してください）
@@ -247,20 +248,31 @@ def delete(post_id):
 # --- いいね機能 ---
 @app.route('/like/<int:post_id>', methods=['POST'])
 def like(post_id):
+    # 1. セッションを使って「最後にいいねした時間」をチェック
+    last_liked_time = session.get('last_liked_time', 0)
+    current_time = time.time()
+    
+    # 前回から0.5秒未満なら、処理をスキップして今の数だけ返す（DB更新しない！）
+    if current_time - last_liked_time < 0.5:
+        conn = sqlite3.connect('sns.db')
+        c = conn.cursor()
+        c.execute("SELECT likes FROM posts WHERE id = ?", (post_id,))
+        likes = c.fetchone()[0]
+        conn.close()
+        return jsonify({'likes': likes}) # 何もせず今の数を返す
+
+    # 2. 0.5秒以上経っていれば、DB更新処理へ進む
+    session['last_liked_time'] = current_time # 時間を更新
+
     conn = sqlite3.connect('sns.db')
     c = conn.cursor()
-    
-    # いいねを +1 する
     c.execute("UPDATE posts SET likes = likes + 1 WHERE id = ?", (post_id,))
     conn.commit()
     
-    # 更新後のいいね数を取得する（ここが追加ポイント）
     c.execute("SELECT likes FROM posts WHERE id = ?", (post_id,))
     new_likes_count = c.fetchone()[0]
-    
     conn.close()
     
-    # 画面遷移(redirect)ではなく、数字データ(json)を返す
     return jsonify({'likes': new_likes_count})
 
 # --- 管理者ログイン ---

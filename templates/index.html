@@ -68,21 +68,31 @@
             }
         }
         function sendLike(postId) {
-            // 1. サーバーに「いいね」リクエストを送る (リロードなし)
-            fetch('/like/' + postId, {
-                method: 'POST'
-            })
-            .then(response => response.json()) // サーバーから返事(JSON)を受け取る
-            .then(data => {
-                // 2. 画面上の数字を書き換える
-                // id="like-count-数字" の場所を探して、新しい数字を入れる
-                const countSpan = document.getElementById('like-count-' + postId);
-                if (countSpan) {
-                    countSpan.textContent = "♥ " + data.likes;
-                }
-            })
-            .catch(error => console.error('Error:', error));
-        }
+        // ボタンそのものを取得 (押された要素)
+        // ※onclickで event を渡すように変更するか、IDから探す必要がありますが、
+        //   簡単にするため、ここでは「IDからボタンを探して無効化」します。
+        
+        // ボタンを特定するのは少し面倒なので、親要素を探すなどの工夫がいりますが、
+        // 一番手っ取り早いのは「全いいねボタンを一瞬無効化」か「フラグ管理」です。
+        // 今回は「通信中は連打できない」フラグを立てる方式にします。
+        
+        if (window.isLiking) return; // ロック中なら何もしない
+        window.isLiking = true;      // ロック開始
+
+        fetch('/like/' + postId, { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            const countSpan = document.getElementById('like-count-' + postId);
+            if (countSpan) countSpan.textContent = "♥ " + data.likes;
+            
+            // 0.5秒後にロック解除
+            setTimeout(() => { window.isLiking = false; }, 500);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            window.isLiking = false; // エラー時も解除
+        });
+    }
     </script>
 </head>
 <body class="bg-light">
